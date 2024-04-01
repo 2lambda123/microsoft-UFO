@@ -23,7 +23,7 @@ global cur_session
 cur_session = None
 
 
-def main(call_from: str = "", task: str = ""):
+def main(arg = ""):
     """
     Main function.
     """
@@ -31,6 +31,11 @@ def main(call_from: str = "", task: str = ""):
     session = flow.Session(parsed_args.task)
     global cur_session
     cur_session = session
+    if arg == "web":
+        if session.request is None:
+            session.query_updated.clear()
+            session.query_updated.wait()
+            session.request = session.usr_query
     step = 0
     status = session.get_status()
     round = session.get_round()

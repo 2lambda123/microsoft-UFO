@@ -5,6 +5,7 @@ import logging
 import os
 import time
 import json
+import threading
 
 from art import text2art
 from pywinauto.uia_defines import NoPatternInterfaceError
@@ -68,8 +69,8 @@ Welcome to use UFO🛸, A UI-focused Agent for Windows OS Interaction.
 Please enter your request to be completed🛸: """.format(art=text2art("UFO"))
 
         print_with_color(welcome_text, "cyan")
-        
-        self.request = input()
+        self.query_updated = threading.Event()
+        self.request = self.process_input()
         self.request_history = []
 
     def process_application_selection(self):
@@ -560,7 +561,7 @@ Please enter your request to be completed🛸: """.format(art=text2art("UFO"))
     def process_input(self, usr_query: str = ""):
         print("inputing, but might stuck")
         self.usr_query = usr_query
-        if self.connected_from_taskweaver:
+        if self.task == "web":
             return None
         else:
             return input()
