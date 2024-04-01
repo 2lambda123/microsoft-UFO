@@ -48,7 +48,10 @@ def main():
             session.process_application_selection()
             step = session.get_step()
             status = session.get_status()
+            print("start waiting for confirmation")
 
+            print("end waiting for confirmation")
+            
             while status.upper() not in ["FINISH", "ERROR"] and step <= configs["MAX_STEP"]:
                 session.process_action_selection()
                 status = session.get_status()
@@ -69,7 +72,6 @@ def main():
                 print_with_color("Max step reached.", "magenta")
                 status = "MAX_STEP_REACHED"
                 break
-
         result = session.get_results()
         round = session.get_round()
 
@@ -80,13 +82,12 @@ def main():
                 round=round), "magenta")
             print_with_color("{result}".format(result=result), "yellow")
 
-
+    
     # Print the total cost
     total_cost = session.get_cost()
     if isinstance(total_cost, float):
         formatted_cost = '${:.2f}'.format(total_cost)
         print_with_color(f"Request total cost is {formatted_cost}", "yellow")
-
     return status
 
 
