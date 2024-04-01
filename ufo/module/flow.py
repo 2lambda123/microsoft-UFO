@@ -556,3 +556,17 @@ Please enter your request to be completed🛸: """.format(art=text2art("UFO"))
         logger.setLevel(configs["LOG_LEVEL"])
 
         return logger
+        
+    def process_input(self, usr_query: str = ""):
+        print("inputing, but might stuck")
+        self.usr_query = usr_query
+        if self.connected_from_taskweaver:
+            return None
+        else:
+            return input()
+
+    def update_query(self, new_usr_query: str):
+        print(f"Updating usr_query to: {new_usr_query}")
+        self.usr_query = new_usr_query
+        self.query_updated.set()  # 设置事件，解除 process_input 中的阻塞
+    
