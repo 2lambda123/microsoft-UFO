@@ -7,6 +7,7 @@ from datetime import datetime
 from .config.config import load_config
 from .module import flow
 from .utils import print_with_color
+from .app import usr_confirmation_signal
 
 
 configs = load_config()
@@ -18,15 +19,18 @@ args.add_argument("--task", help="The name of current task.",
 
 parsed_args = args.parse_args()
 
+global cur_session
+cur_session = None
 
 
-def main():
+def main(call_from: str = "", task: str = ""):
     """
     Main function.
     """
 
     session = flow.Session(parsed_args.task)
-
+    global cur_session
+    cur_session = session
     step = 0
     status = session.get_status()
     round = session.get_round()
@@ -49,7 +53,8 @@ def main():
             step = session.get_step()
             status = session.get_status()
             print("start waiting for confirmation")
-
+            usr_confirmation_signal.wait()
+            usr_confirmation_signal.clear()
             print("end waiting for confirmation")
             
             while status.upper() not in ["FINISH", "ERROR"] and step <= configs["MAX_STEP"]:
@@ -90,6 +95,20 @@ def main():
         print_with_color(f"Request total cost is {formatted_cost}", "yellow")
     return status
 
+class InputIntegrater:
+    def __init__(self):
+        global cur_session
+        self.current_session = cur_session
 
+    def process_web_input(self, input_from_web):
+        """
+        Process an input coming from Taskweaver.
+        :param input_from_taskweaver: The input to be processed.
+        """
+        if self.current_session is not None:
+            self.current_session.update_query(input_from_web)
+        else:
+            print("No active session to process the input.")
+    
 if __name__ == "__main__":
     main()

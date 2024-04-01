@@ -13,43 +13,42 @@ class Web_app():
         self.process = None
         self.plan_signal = threading.Event()
 
-    def ufo_start(self, task_name):
-        os.chdir(UFO_PATH)
-        cmd = f"python -m ufo --task {task_name}"
-        try:
-            env = os.environ.copy()
-            env['PYTHONIOENCODING'] = 'utf-8'
-            # process = subprocess.run(cmd, shell=True, env=env, text=True, encoding='utf-8')
-            self.process = subprocess.Popen(cmd, shell=True, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, env=env, text=True, encoding='utf-8')
-            self.output_thread = threading.Thread(target=self.display_output, args=(self.process,))
-            self.output_thread.start()
-        except subprocess.CalledProcessError as e:
-            return jsonify({"error": "An error occurred while executing the task"}), 500
-
-        # self.post_proxy = post_proxy
-        # old_stdout = sys.stdout
-        # sys.stdout = StdoutWrapper(old_stdout, self.ufo_terminate)
-        # self.simulate_args(task_name)
+    def ufo_start(self, task_name, usr_request):
+        # os.chdir(UFO_PATH)
+        # cmd = f"python -m ufo --task {task_name}"
         # try:
-            
-        #     with self.working_directory(r"C:\Users\v-liuhengyu\OneDrive - Microsoft\Desktop\UFO"):
-        #         from ufo.ufo import main as ufo_main
-        #         ufo_main("taskweaver")  # Execution of UFO, with output captured and processed by custom_buffer
-            
-        #         self.ufo_terminate.set()
-        #         print("UFO has been started successfully.")
-        # finally:
-        #     sys.stdout = old_stdout  # Restore original stdout
+        #     env = os.environ.copy()
+        #     env['PYTHONIOENCODING'] = 'utf-8'
+        #     # process = subprocess.run(cmd, shell=True, env=env, text=True, encoding='utf-8')
+        #     self.process = subprocess.Popen(cmd, shell=True, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, env=env, text=True, encoding='utf-8')
+        #     self.output_thread = threading.Thread(target=self.display_output, args=(self.process,))
+        #     self.output_thread.start()
+        # except subprocess.CalledProcessError as e:
+        #     return jsonify({"error": "An error occurred while executing the task"}), 500
+
+        old_stdout = sys.stdout
+        sys.stdout = StdoutWrapper(old_stdout, self.ufo_terminate)
+        self.simulate_args(task_name)
+        try:
+            from .ufo import main as ufo_main
+            ufo_main(call_from = "web", task = usr_request)  # Execution of UFO, with output captured and processed by custom_buffer
+            print("UFO has been started successfully.")
+        finally:
+            sys.stdout = old_stdout  # Restore original stdout
 
     def process_input(self, usr_request):
-        self.process.stdin.write(usr_request)
-        self.process.stdin.flush()
-        self.process.stdin.close()
-        print("Request sent")
-        terminate_signal.wait()
-        terminate_signal.clear()
+        # self.process.stdin.write(usr_request)
+        # self.process.stdin.flush()
+        # self.process.stdin.close()
+        # print("Request sent")
+        # terminate_signal.wait()
+        # terminate_signal.clear()
         # usr_confirmation_signal.wait()
         # usr_confirmation_signal.clear()
+
+        from.ufo import InputIntegrater
+        input_manager = InputIntegrater()
+        input_manager.process_taskweaver_input(object)
         
     def display_output(self, process):
         accumulated_output = ''
@@ -89,8 +88,8 @@ def ufo_command_wrapper():
     task_name = request.json.get('task', 'web_app')
     usr_request = request.json.get('request', 'No Request, end UFO')
     if confirmation != "Y":
-        web_app_instance.ufo_start(task_name)
-        web_app_instance.process_input(usr_request)
+        web_app_instance.ufo_start(task_name, usr_request)
+        # web_app_instance.process_input(usr_request)
     
 # else:
 
