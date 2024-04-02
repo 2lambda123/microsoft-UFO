@@ -1,12 +1,16 @@
 from flask import Flask, request, jsonify
 import subprocess
-import shlex, os, time, threading, sys
+import shlex, os, time, threading, sys, re
+
 app = Flask(__name__)
 usr_confirmation_signal = threading.Event()
-ufo_termination_signal = threading.Event()
 UFO_PATH = r"C:\Users\v-liuhengyu\OneDrive - Microsoft\Desktop\UFO"
 terminate_signal = threading.Event()
-
+plan_signal = threading.Event()
+global plan_first_return
+plan_first_return = []
+global comment_to_return
+comment_to_return = None
 
 class StdoutWrapper:
     def __init__(self, original_stdout):
@@ -15,10 +19,12 @@ class StdoutWrapper:
         self.terminate_signal = terminate_signal
         self.security_check_flag = False
         self.finished = False
+        self.plans = []
+        self.current_plan = None
+        self.output_plan = False
+        self.final_comment = None
 
     def write(self, s):
-        # 直接将输出同时写入原始stdout，如果你不希望这样，可以注释掉下面这行
-
         self.accumulated_output += s
         if "\n" in self.accumulated_output:  # 假设输出是按行分隔的
             lines = self.accumulated_output.split("\n")
@@ -30,30 +36,42 @@ class StdoutWrapper:
         self.original_stdout.flush()
 
     def process_line(self, line):
-        # print(line)
+        self.original_stdout.write(line + '\n')
         
         if "Observations" in line or "Selected item" in line or "Thoughts" in line:
             return
-        if 'FINISH' in line:
-            self.accumulated_output = ''
-            self.finished = True
-        if 'Next Plan' in line:
-            self.accumulated_output = ''
-        if not self.finished:
-            if 'Comment' in line:
-                # self.plan_signal.set()  # Signal
-                print(accumulated_output)
-                self.accumulated_output = ''
-            self.accumulated_output += line
-        else:
-            self.accumulated_output += line
-            if 'Comment' in line:
-                print(accumulated_output)
-                self.accumulated_output = ''
-        if "Please enter your new request. Enter 'N' for exit." in line or "Request total cost is" in line or "[Input Required:]" in line:
-            terminate_signal.set() 
-            self.accumulated_output = ''
 
+        if 'Next Plan' in line:
+            self.current_plan = {'plan': line}
+            self.plans.append(self.current_plan)  
+            return  
+
+        if 'Comment' in line:
+            self.final_comment = line
+            self.current_plan = None  
+            plan_signal.set() 
+            self.original_stdout.write(str(self.plans))
+            if not self.output_plan:
+                global plan_first_return
+                plan_first_return = self.get_cleaned_plans()
+                self.output_plan = True
+            return  
+        if self.current_plan:
+            self.current_plan['plan'] += line
+        if "Please enter your new request. Enter 'N' for exit." in line or "Request total cost is" in line or "[Input Required:]" in line:
+            terminate_signal.set()
+            self.finished = True  # 标记为完成
+            global comment_to_return
+            comment_to_return = self.clean_ansi_codes(self.final_comment)
+            return
+    
+    def clean_ansi_codes(self, text):
+        ansi_escape = re.compile(r'\x1b\[.*?m')
+        return ansi_escape.sub('', text)
+    def get_cleaned_plans(self):
+        combined_plans = '\n'.join([self.clean_ansi_codes(plan['plan']) for plan in self.plans])
+        response_data = {"response": combined_plans}
+        return response_data
     def __getattr__(self, attr):
         return getattr(self.original_stdout, attr)
     
@@ -62,48 +80,25 @@ class Web_app():
     def __init__(self) -> None:
         self.output_thread = None
         self.process = None
-        self.plan_signal = threading.Event()
 
     def simulate_args(self, task: str):
         sys.argv = ['ufo.py', '--task', task]
         print(sys.argv)
 
     def ufo_start(self, task_name, usr_request):
-        # os.chdir(UFO_PATH)
-        # cmd = f"python -m ufo --task {task_name}"
-        # try:
-        #     env = os.environ.copy()
-        #     env['PYTHONIOENCODING'] = 'utf-8'
-        #     # process = subprocess.run(cmd, shell=True, env=env, text=True, encoding='utf-8')
-        #     self.process = subprocess.Popen(cmd, shell=True, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, env=env, text=True, encoding='utf-8')
-        #     self.output_thread = threading.Thread(target=self.display_output, args=(self.process,))
-        #     self.output_thread.start()
-        # except subprocess.CalledProcessError as e:
-        #     return jsonify({"error": "An error occurred while executing the task"}), 500
-
-        # old_stdout = sys.stdout
-        # sys.stdout = StdoutWrapper(old_stdout)
+        old_stdout = sys.stdout
+        sys.stdout = StdoutWrapper(old_stdout)
         self.simulate_args(task_name)
         try:
             from .ufo import main as ufo_main
-            ufo_main(arg = "web")  # Execution of UFO, with output captured and processed by custom_buffer
-            print("UFO has been started successfully.")
-        finally:
-            sys.stdout = old_stdout  # Restore original stdout
-
+            ufo_main(arg = "web", signal = usr_confirmation_signal)  # Execution of UFO, with output captured and processed by custom_buffer
+        except Exception as e:
+            print(e)
     def process_input(self, usr_request):
-        # self.process.stdin.write(usr_request)
-        # self.process.stdin.flush()
-        # self.process.stdin.close()
-        # print("Request sent")
-        # terminate_signal.wait()
-        # terminate_signal.clear()
-        # usr_confirmation_signal.wait()
-        # usr_confirmation_signal.clear()
-
+        # print("Processing input")
         from.ufo import InputIntegrater
         input_manager = InputIntegrater()
-        input_manager.process_web_input(object)
+        input_manager.process_web_input(usr_request)
         
     def display_output(self, process):
         accumulated_output = ''
@@ -119,7 +114,7 @@ class Web_app():
                 accumulated_output = ''
             if not finished:
                 if 'Comment' in line:
-                    self.plan_signal.set()  # Signal
+                    plan_signal.set()  # Signal
                     print(accumulated_output)
                     accumulated_output = ''
                 accumulated_output += line
@@ -143,10 +138,14 @@ def ufo_command_wrapper():
     task_name = request.json.get('task', 'web')
     usr_request = request.json.get('request', 'No Request, end UFO')
     if confirmation != "Y":
-        web_app_instance.ufo_start(task_name, usr_request)
-        print("UFO has been started successfully.")
-        web_app_instance.process_input(usr_request)
-    
+        main_thread = threading.Thread(target=web_app_instance.ufo_start, args=(task_name, usr_request))
+        input_thread = threading.Thread(target=web_app_instance.process_input, args=(usr_request,))
+        main_thread.start()
+        time.sleep(5)
+        input_thread.start()
+        plan_signal.wait()
+        plan_signal.clear()
+    return jsonify(plan_first_return), 200
 # else:
 
 @app.route('/ufo/confirmation', methods=['POST'])
@@ -154,9 +153,8 @@ def ufo_confirmation_wrapper():
     confirmation = request.json.get('confirmation', 'No Confirmation')
     if confirmation == 'Y':
         usr_confirmation_signal.set()
-        print("set the lock")
-        # terminate_signal.wait()
-        return jsonify({"message": "Confirmation received"}), 200
+        terminate_signal.wait()
+        return jsonify({"response": comment_to_return}), 200
     else:
         return jsonify({"error": "Invalid confirmation"}), 400
 

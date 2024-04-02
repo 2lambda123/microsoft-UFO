@@ -23,7 +23,7 @@ global cur_session
 cur_session = None
 
 
-def main(arg = ""):
+def main(arg = "", signal = None):
     """
     Main function.
     """
@@ -31,6 +31,7 @@ def main(arg = ""):
     session = flow.Session(parsed_args.task)
     global cur_session
     cur_session = session
+    print("Session created.", session)
     if arg == "web":
         if session.request is None:
             session.query_updated.clear()
@@ -58,8 +59,8 @@ def main(arg = ""):
             step = session.get_step()
             status = session.get_status()
             print("start waiting for confirmation")
-            usr_confirmation_signal.wait()
-            usr_confirmation_signal.clear()
+            signal.wait()
+            signal.clear()
             print("end waiting for confirmation")
             
             while status.upper() not in ["FINISH", "ERROR"] and step <= configs["MAX_STEP"]:
