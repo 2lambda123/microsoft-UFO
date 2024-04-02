@@ -4,13 +4,23 @@
 import argparse
 from datetime import datetime
 
+import threading, sys
+
 from .config.config import load_config
 from .module import flow
 from .utils import print_with_color
-from .app import usr_confirmation_signal
+
 
 
 configs = load_config()
+
+
+global cur_session
+cur_session = None
+
+termination_signal = threading.Event()
+usr_confirmation_signal = threading.Event()
+
 
 
 args = argparse.ArgumentParser()
@@ -19,19 +29,14 @@ args.add_argument("--task", help="The name of current task.",
 
 parsed_args = args.parse_args()
 
-global cur_session
-cur_session = None
 
-
-def main(arg = "", signal = None):
+def main(arg = ""):
     """
     Main function.
     """
-
     session = flow.Session(parsed_args.task)
     global cur_session
     cur_session = session
-    print("Session created.", session)
     if arg == "web":
         if session.request is None:
             session.query_updated.clear()
@@ -58,10 +63,15 @@ def main(arg = "", signal = None):
             session.process_application_selection()
             step = session.get_step()
             status = session.get_status()
+
             print("start waiting for confirmation")
-            signal.wait()
-            signal.clear()
+            usr_confirmation_signal.wait()
+            usr_confirmation_signal.clear()
             print("end waiting for confirmation")
+            print("check termination")
+            if termination_signal.is_set():
+                print("termination signal received")
+                status = "FINISH"
             
             while status.upper() not in ["FINISH", "ERROR"] and step <= configs["MAX_STEP"]:
                 session.process_action_selection()
@@ -115,6 +125,13 @@ class InputIntegrater:
             self.current_session.update_query(input_from_web)
         else:
             print("No active session to process the input.")
+    
+    def terminate_ufo(self):
+        termination_signal.set()
+
+    def pass_confirmation(self):
+        usr_confirmation_signal.set()
+
     
 if __name__ == "__main__":
     main()

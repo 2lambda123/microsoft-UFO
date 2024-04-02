@@ -1,12 +1,13 @@
 from flask import Flask, request, jsonify
-import subprocess
-import shlex, os, time, threading, sys, re
+import time, threading, sys, re
 
 app = Flask(__name__)
-usr_confirmation_signal = threading.Event()
+
 UFO_PATH = r"C:\Users\v-liuhengyu\OneDrive - Microsoft\Desktop\UFO"
 terminate_signal = threading.Event()
 plan_signal = threading.Event()
+global_input_manager = None
+
 global plan_first_return
 plan_first_return = []
 global comment_to_return
@@ -17,20 +18,20 @@ class StdoutWrapper:
         self.original_stdout = original_stdout
         self.accumulated_output = ""
         self.terminate_signal = terminate_signal
-        self.security_check_flag = False
         self.finished = False
         self.plans = []
         self.current_plan = None
         self.output_plan = False
         self.final_comment = None
 
+
     def write(self, s):
         self.accumulated_output += s
-        if "\n" in self.accumulated_output:  # 假设输出是按行分隔的
+        if "\n" in self.accumulated_output:  
             lines = self.accumulated_output.split("\n")
-            for line in lines[:-1]:  # 处理除最后一行外的所有完整行
+            for line in lines[:-1]:  
                 self.process_line(line)
-            self.accumulated_output = lines[-1]  # 将未完成的行留在缓冲区中
+            self.accumulated_output = lines[-1]  
 
     def flush(self):
         self.original_stdout.flush()
@@ -60,7 +61,7 @@ class StdoutWrapper:
             self.current_plan['plan'] += line
         if "Please enter your new request. Enter 'N' for exit." in line or "Request total cost is" in line or "[Input Required:]" in line:
             terminate_signal.set()
-            self.finished = True  # 标记为完成
+            self.finished = True 
             global comment_to_return
             comment_to_return = self.clean_ansi_codes(self.final_comment)
             return
@@ -91,42 +92,16 @@ class Web_app():
         self.simulate_args(task_name)
         try:
             from .ufo import main as ufo_main
-            ufo_main(arg = "web", signal = usr_confirmation_signal)  # Execution of UFO, with output captured and processed by custom_buffer
-        except Exception as e:
-            print(e)
-    def process_input(self, usr_request):
-        # print("Processing input")
-        from.ufo import InputIntegrater
-        input_manager = InputIntegrater()
-        input_manager.process_web_input(usr_request)
-        
-    def display_output(self, process):
-        accumulated_output = ''
-        finished = False
-        for line in iter(process.stdout.readline, ''):
-            print(line)
-            if "Observations" in line or "Selected item" in line or "Thoughts" in line:
-                continue
-            if 'FINISH' in line:
-                accumulated_output = ''
-                finished = True
-            if 'Next Plan' in line:
-                accumulated_output = ''
-            if not finished:
-                if 'Comment' in line:
-                    plan_signal.set()  # Signal
-                    print(accumulated_output)
-                    accumulated_output = ''
-                accumulated_output += line
-            else:
-                accumulated_output += line
-                if 'Comment' in line:
-                    print(accumulated_output)
-                    accumulated_output = ''
-            if "Please enter your new request. Enter 'N' for exit." in line or "Request total cost is" in line or "[Input Required:]" in line:
-                terminate_signal.set() 
-                accumulated_output = ''
+            ufo_main(arg = "web")  # Execution of UFO, with output captured and processed by custom_buffer
+        finally:
+            sys.stdout = old_stdout
 
+    def process_input(self, usr_request):
+        from .ufo import InputIntegrater
+        self.input_manager = InputIntegrater()
+        self.input_manager.process_web_input(usr_request)
+        return
+        
 
 
 web_app_instance = Web_app()
@@ -134,29 +109,29 @@ web_app_instance = Web_app()
 # Define a wrapper function for your route that calls your instance 
 @app.route('/ufo', methods=['POST'])
 def ufo_command_wrapper():
-    confirmation = request.json.get('confirmation', 'No Confirmation')
     task_name = request.json.get('task', 'web')
     usr_request = request.json.get('request', 'No Request, end UFO')
-    if confirmation != "Y":
-        main_thread = threading.Thread(target=web_app_instance.ufo_start, args=(task_name, usr_request))
-        input_thread = threading.Thread(target=web_app_instance.process_input, args=(usr_request,))
-        main_thread.start()
-        time.sleep(5)
-        input_thread.start()
-        plan_signal.wait()
-        plan_signal.clear()
+    web_app_instance.main_thread = threading.Thread(target=web_app_instance.ufo_start, args=(task_name, usr_request))
+    web_app_instance.input_thread = threading.Thread(target=web_app_instance.process_input, args=(usr_request,))
+    web_app_instance.main_thread.start()
+    time.sleep(5)
+    web_app_instance.input_thread.start()
+    plan_signal.wait()
+    plan_signal.clear()
     return jsonify(plan_first_return), 200
-# else:
+
 
 @app.route('/ufo/confirmation', methods=['POST'])
 def ufo_confirmation_wrapper():
     confirmation = request.json.get('confirmation', 'No Confirmation')
     if confirmation == 'Y':
-        usr_confirmation_signal.set()
+        web_app_instance.input_manager.pass_confirmation()
         terminate_signal.wait()
         return jsonify({"response": comment_to_return}), 200
     else:
-        return jsonify({"error": "Invalid confirmation"}), 400
+        web_app_instance.input_manager.terminate_ufo()
+        web_app_instance.input_manager.pass_confirmation()
+        return jsonify({"response": "Action canceled, terminating UFO instance"}), 200
 
 if __name__ == '__main__':
     app.run(debug=True)

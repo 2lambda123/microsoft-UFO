@@ -67,11 +67,14 @@ class Session(object):
 Welcome to use UFO🛸, A UI-focused Agent for Windows OS Interaction. 
 {art}
 Please enter your request to be completed🛸: """.format(art=text2art("UFO"))
-
         print_with_color(welcome_text, "cyan")
         self.query_updated = threading.Event()
+        print("initializing request", self.task)
         self.request = self.process_input()
+        print(self.request)
         self.request_history = []
+        
+        print("finish initializing session")
 
     def process_application_selection(self):
 
@@ -559,7 +562,6 @@ Please enter your request to be completed🛸: """.format(art=text2art("UFO"))
         return logger
         
     def process_input(self, usr_query: str = ""):
-        print("inputing, but might stuck")
         self.usr_query = usr_query
         if self.task == "web":
             return None
@@ -567,7 +569,6 @@ Please enter your request to be completed🛸: """.format(art=text2art("UFO"))
             return input()
 
     def update_query(self, new_usr_query: str):
-        print(f"Updating usr_query to: {new_usr_query}")
         self.usr_query = new_usr_query
-        self.query_updated.set()  # 设置事件，解除 process_input 中的阻塞
+        self.query_updated.set() 
     
