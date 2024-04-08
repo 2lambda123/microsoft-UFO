@@ -69,12 +69,8 @@ Welcome to use UFO🛸, A UI-focused Agent for Windows OS Interaction.
 Please enter your request to be completed🛸: """.format(art=text2art("UFO"))
         print_with_color(welcome_text, "cyan")
         self.query_updated = threading.Event()
-        print("initializing request", self.task)
         self.request = self.process_input()
-        print(self.request)
         self.request_history = []
-        
-        print("finish initializing session")
 
     def process_application_selection(self):
 
@@ -93,8 +89,6 @@ Please enter your request to be completed🛸: """.format(art=text2art("UFO"))
         self.results = ""
 
         desktop_windows_dict, desktop_windows_info = control.get_desktop_app_info_dict()
-
-
         app_selection_prompt_system_message = self.app_selection_prompter.system_prompt_construction()
         app_selection_prompt_user_message = self.app_selection_prompter.user_content_construction([desktop_screen_url], self.request_history, self.action_history, 
                                                                                                   desktop_windows_info, self.plan, self.request)
@@ -103,7 +97,6 @@ Please enter your request to be completed🛸: """.format(art=text2art("UFO"))
 
         
         self.request_logger.debug(json.dumps({"step": self.step, "prompt": app_selection_prompt_message, "status": ""}))
-
         try:
             response_string, cost = llm_call.get_completion(app_selection_prompt_message, "APP", use_backup_engine=True)
 
@@ -114,7 +107,6 @@ Please enter your request to be completed🛸: """.format(art=text2art("UFO"))
             self.status = "ERROR"
             return
         self.update_cost(cost=cost)
-
         try:
             response_json = json_parser(response_string)
 
@@ -394,7 +386,7 @@ Please enter your request to be completed🛸: """.format(art=text2art("UFO"))
         print_with_color("""Would you like to save the current conversation flow for future reference by the agent?
 [Y] for yes, any other key for no.""", "cyan")
         
-        self.request = input()
+        self.request = self.wait_for_input()
 
         if self.request.upper() == "Y":
             return True
@@ -429,7 +421,7 @@ Please enter your request to be completed🛸: """.format(art=text2art("UFO"))
         self.round += 1
         print_with_color("""Please enter your new request. Enter 'N' for exit.""", "cyan")
         
-        self.request = input()
+        self.request = self.wait_for_input()
 
         if self.request.upper() == "N":
             self.status = "ALLFINISH"
@@ -563,7 +555,7 @@ Please enter your request to be completed🛸: """.format(art=text2art("UFO"))
         
     def process_input(self, usr_query: str = ""):
         self.usr_query = usr_query
-        if self.task == "web":
+        if self.task == "web" or self.task == "taskweaver":
             return None
         else:
             return input()
@@ -572,3 +564,10 @@ Please enter your request to be completed🛸: """.format(art=text2art("UFO"))
         self.usr_query = new_usr_query
         self.query_updated.set() 
     
+    def wait_for_input(self):
+        if self.task == "taskweaver":
+            self.query_updated.wait()
+            self.query_updated.clear()
+            return self.usr_query
+        else:
+            return input()
