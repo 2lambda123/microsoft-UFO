@@ -16,7 +16,7 @@ For more details definition of the state pattern, please refer to the state.py m
 
 import json
 import logging
-import os
+import os, threading
 from abc import ABC, abstractmethod
 from typing import Dict, Optional
 
@@ -66,6 +66,8 @@ class BaseRound(ABC):
         self._state = agent.state
         self._id = id
         self._should_evaluate = should_evaluate
+        self.pause_event = threading.Event()
+        self.pause_event.set()
 
         self._init_context()
 
@@ -99,6 +101,7 @@ class BaseRound(ABC):
             self.state = self.agent.state.next_state(self.agent)
             self.agent = self.agent.state.next_agent(self.agent)
             self.agent.set_state(self.state)
+            self.pause_event.wait()
 
         self.agent.blackboard.add_requests(
             {"request_{i}".format(i=self.id), self.request}
@@ -293,6 +296,7 @@ class BaseSession(ABC):
 
         self._context = Context()
         self._init_context()
+        # self.init_logger()
         self._finish = False
 
         self._host_agent: HostAgent = AgentFactory.create_agent(
@@ -305,6 +309,29 @@ class BaseSession(ABC):
             configs["ALLOW_OPENAPP"],
         )
 
+    def init_logger(self) -> None:
+        """
+        Reinitialize the logger.
+        """
+
+        # Initialize the log path and the logger
+        logger = self.initialize_logger(self.log_path, "response.log")
+        request_logger = self.initialize_logger(self.log_path, "request.log")
+        eval_logger = self.initialize_logger(self.log_path, "evaluation.log")
+
+        self.context.set(ContextNames.LOGGER, logger)
+        self.context.set(ContextNames.REQUEST_LOGGER, request_logger)
+        self.context.set(ContextNames.EVALUATION_LOGGER, eval_logger)
+
+
+    def remove_logger(self) -> None:
+        """
+        Remove the logger before serialization.
+        """
+        self._context.set(ContextNames.LOGGER, None)
+        self._context.set(ContextNames.REQUEST_LOGGER, None)
+        self._context.set(ContextNames.EVALUATION_LOGGER, None)
+
     def run(self) -> None:
         """
         Run the session.
@@ -316,6 +343,7 @@ class BaseSession(ABC):
             if round is None:
                 break
             round.run()
+
 
         if self.application_window is not None:
             self.capture_last_snapshot()

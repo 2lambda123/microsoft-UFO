@@ -1,8 +1,11 @@
 # Copyright (c) Microsoft Corporation.
 # Licensed under the MIT License.
 
-import os
+from logging import Logger
+from typing import Optional
+import os, dill, uuid, copy
 from typing import List
+from pywinauto.controls.uiawrapper import UIAWrapper
 
 from ufo import utils
 from ufo.agents.states.app_agent_state import ContinueAppAgentState
@@ -15,31 +18,143 @@ from ufo.module.context import ContextNames
 
 configs = Config.get_instance().config_data
 
+global session_id
+session_id = ''
+
+
+class SessionManager:
+    """
+    The manager for the UFO sessions.
+    """
+    def __init__(self):
+        self.sessions = {}
+        self.confirmation_locked = False
+        self.session_id = None
+
+
+    def generate_session_id(self) -> str:
+        """
+        Generate a unique session ID.
+        """
+        return str(uuid.uuid4())
+    
+
+    def get_state(self) -> dict:
+        """
+        Get the state of the current session.
+        """
+        if self.sessions[self.session_id][0].current_round is None:
+            return {"response": "No session running"}
+        state_info = {
+            "state_name": self.sessions[self.session_id][0].current_round.state.name()  # Assuming state has a 'name' attribute
+        }
+        return state_info
+    
+
+    def get_session_file_path(self, session_id: str = '') -> str:
+        """
+        Get the absolute file path for the session.
+        """
+        current_working_dir = os.path.join(os.getcwd(), 'stored_sessions')
+        if session_id == '':
+            return os.path.join(current_working_dir, f'session_{self.session_id}.pkl')
+        return os.path.join(current_working_dir, f'session_{session_id}.pkl')
+
+
+    def store_session(self) -> None:
+        """
+        Store the session in memory.
+        :param session_id: The ID of the session to store.
+        """
+        new_session_id = self.generate_session_id()
+        session = self.sessions[self.session_id][0]
+        session_copy = copy.deepcopy(session)  # Create a deep copy of the session
+        self.sessions[new_session_id] = [session_copy]
+        print(f"Session {new_session_id} stored in memory.")
+        self.terminate_session()  # 
+
+
+    def load_session(self, session_id):
+        """
+        Load the session from a file.
+        :param session_id: The ID of the session to load.
+        """
+        if session_id in self.sessions:
+            print(f"Session {session_id} already loaded.")
+            return self.sessions[session_id]
+        ValueError(f"No session found with ID: {session_id}")
+        
+        # file_path = self.get_session_file_path(session_id)
+        # if os.path.exists(file_path):
+        #     with open(file_path, 'rb') as f:
+        #         sessions = dill.load(f)
+        #         sessions[0].initialize_logger()  # Reinitialize logger after deserialization
+        #         self.sessions[session_id] = sessions
+        #         self.session_id = session_id
+        # else:
+        #     print(f"No session found with ID: {session_id}")
+        #     self.sessions[session_id] = None
+        # return self.sessions[session_id]
+
+
+    def unlock_confirmation(self) -> None:
+        """
+        Unlock the confirmation for a specific session.
+        :param session_id: The ID of the session to unlock confirmation.
+        """
+        self.sessions[self.session_id][0]._host_agent.usr_confirmation_lock.set()
+
+
+    def terminate_session(self) -> None:
+        """
+        Terminate a specific session.
+        :param session_id: The ID of the session to terminate.
+        """
+        print("terminated")
+        self.sessions[self.session_id][0]._host_agent.status = "FINISH"
+        self.sessions[self.session_id][0]._host_agent.usr_confirmation_lock.set()
+
+    def pause_session(self) -> Optional[dict]:
+        round = self.sessions[self.session_id][0].current_round
+        if round is not None:
+            round.pause_event.clear()
+        else:
+            return {'response': 'No session running'}
+
+
+    def resume_session(self) -> Optional[dict]:
+        round = self.sessions[self.session_id][0].current_round
+        if round is not None:
+            round.pause_event.set()
+        else:
+            return {'response': 'No session running'}
+
+
+Global_Session = SessionManager()
 
 class SessionFactory:
     """
     The factory class to create a session.
     """
-
-    def create_session(self, task: str, mode: str, plan: str) -> BaseSession:
+    def create_session(self, task: str, mode: str, plan: str) -> str:
         """
-        Create a session.
-        :param task: The name of current task.
-        :param mode: The mode of the task.
-        :return: The created session.
+        Create a new session with a unique ID.
         """
+        session_id = Global_Session.generate_session_id()
+        Global_Session.session_id = session_id
         if mode == "normal":
-            return [Session(task, configs.get("EVA_SESSION", False), id=0)]
+            Global_Session.sessions[session_id] = [Session(task, configs.get("EVA_SESSION", False), id=session_id)]
         elif mode == "follower":
-            # If the plan is a folder, create a follower session for each plan file in the folder.
             if self.is_folder(plan):
-                return self.create_follower_session_in_batch(task, plan)
+                Global_Session.sessions[session_id] = self.create_follower_session_in_batch(task, plan, session_id)
             else:
-                return [
-                    FollowerSession(task, plan, configs.get("EVA_SESSION", False), id=0)
+                Global_Session.sessions[session_id] = [
+                    FollowerSession(task, plan, configs.get("EVA_SESSION", False), id=session_id)
                 ]
         else:
             raise ValueError(f"The {mode} mode is not supported.")
+        print(f"New session created with ID: {session_id}")
+        return Global_Session.sessions[session_id], session_id
 
     def create_follower_session_in_batch(
         self, task: str, plan: str
@@ -96,6 +211,28 @@ class Session(BaseSession):
     A session for UFO.
     """
 
+    def __deepcopy__(self, memo):
+        # Create a new instance of Session
+        new_session = self.__class__.__new__(self.__class__)
+        
+        # Add the new instance to the memo dictionary
+        memo[id(self)] = new_session
+        
+        # Copy each attribute
+        for key, value in self.__dict__.items():
+            if key == 'uia_wrapper':
+                # Store element_info instead of the UIAWrapper instance
+                setattr(new_session, 'uia_wrapper', None)
+            else:
+                setattr(new_session, key, copy.deepcopy(value, memo))
+        
+        # Restore the UIAWrapper instance after deepcopy
+        if self._original_application_window.element_info:
+            new_session.uia_wrapper = UIAWrapper(self.element_info)
+        
+        return new_session
+
+
     def run(self) -> None:
         """
         Run the session.
@@ -104,6 +241,12 @@ class Session(BaseSession):
         # Save the experience if the user asks so.
         if interactor.experience_asker():
             self.experience_saver()
+
+    def init_logger(self) -> None:
+        super().init_logger()
+    
+    def remove_logger(self) -> None:
+        super().remove_logger()
 
     def _init_context(self) -> None:
         """
@@ -163,6 +306,51 @@ class Session(BaseSession):
         request_memory = self._host_agent.blackboard.requests
         return request_memory.to_json()
 
+    def remove_nonserializable(self):
+        """
+        Remove or convert non-serializable attributes to serializable format.
+        """
+        # self._original_application_window = self.context.get(ContextNames.APPLICATION_WINDOW)
+        # if isinstance(self._original_application_window, UIAWrapper):
+        print(type(self.context.get(ContextNames.APPLICATION_WINDOW)), self.context.get(ContextNames.APPLICATION_WINDOW))
+        self._original_application_window = self.context.get(ContextNames.APPLICATION_WINDOW)
+        if isinstance(self._original_application_window, UIAWrapper):
+            self.context.set(ContextNames.APPLICATION_WINDOW, self._original_application_window.element_info)
+        # self.context.set(ContextNames.APPLICATION_WINDOW, self.context.get(ContextNames.APPLICATION_WINDOW).element_info)
+        self._original_host_agent_application_window = self._host_agent.processor.application_window
+        if isinstance(self._original_host_agent_application_window, UIAWrapper):
+            self._host_agent.processor.application_window = self._original_host_agent_application_window.element_info
+        self._original_logger = self.context.get(ContextNames.LOGGER)
+        self._original_request_logger = self.context.get(ContextNames.REQUEST_LOGGER)
+        self._original_evaluation_logger = self.context.get(ContextNames.EVALUATION_LOGGER)
+        
+        self.context.set(ContextNames.LOGGER, None)
+        self.context.set(ContextNames.REQUEST_LOGGER, None)
+        self.context.set(ContextNames.EVALUATION_LOGGER, None)
+
+
+    def restore_nonserializable(self):
+        """
+        Restore non-serializable attributes from their serializable format.
+        """
+
+        if isinstance(self.context.get(ContextNames.APPLICATION_WINDOW), UIAWrapper):
+            self.context.set(ContextNames.APPLICATION_WINDOW, UIAWrapper(self.context.get(ContextNames.APPLICATION_WINDOW)))
+        self._host_agent.processor.application_window = UIAWrapper(self._host_agent.processor.application_window)
+        self.context.set(ContextNames.LOGGER, self._original_logger)
+        self.context.set(ContextNames.REQUEST_LOGGER, self._original_request_logger)
+        self.context.set(ContextNames.EVALUATION_LOGGER, self._original_evaluation_logger)
+    def __getstate__(self):
+        state = self.__dict__.copy()
+        self.remove_nonserializable()
+        return state
+
+
+    def __setstate__(self, state):
+        print("ERROR")
+        self.__dict__.update(state)
+        print("Restoring non-serializable attributes")
+        self.restore_nonserializable()
 
 class FollowerSession(BaseSession):
     """

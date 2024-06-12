@@ -5,6 +5,7 @@
 import json
 import time
 from typing import TYPE_CHECKING
+import threading
 
 from pywinauto.controls.uiawrapper import UIAWrapper
 
@@ -41,6 +42,7 @@ class HostAgentProcessor(BaseProcessor):
         self._desktop_windows_dict = None
         self._desktop_windows_info = None
         self.app_to_open = None
+        self.usr_confirmation = threading.Event()
 
     def print_step_info(self) -> None:
         """
@@ -173,7 +175,7 @@ class HostAgentProcessor(BaseProcessor):
         else:
             # Get the application window
             new_app_window = self._desktop_windows_dict.get(self.control_label, None)
-
+            print("NEW APP WINDOW TYPE", type(new_app_window))
         if new_app_window is None:
             return
 
@@ -221,7 +223,7 @@ class HostAgentProcessor(BaseProcessor):
             utils.print_with_color("Switching to a new application...", "magenta")
 
         self.application_window = new_app_window
-
+        print("---------------------------------", type(self.application_window))
         self.context.set(ContextNames.APPLICATION_WINDOW, self.application_window)
 
         self.context.set(ContextNames.APPLICATION_ROOT_NAME, self.app_root)
@@ -277,3 +279,10 @@ class HostAgentProcessor(BaseProcessor):
         # Wait for the application to be ready after an action is taken before proceeding to the next step.
         if self.status != self._agent_status_manager.FINISH.value:
             time.sleep(configs["SLEEP_TIME"])
+    
+    def waiting_confirmation(self) -> None:
+        while True:
+            if self.usr_confirmation.is_set():
+                break
+
+

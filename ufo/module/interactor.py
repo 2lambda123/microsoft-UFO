@@ -14,14 +14,39 @@ Please enter your request to be completed🛸: """.format(
     art=text2art("UFO")
 )
 
+class InputManager:
+    """
+    The class to manage the input of the user from web.
+    """
+    def __init__(self):
+        self.inputs = {}
+    
+    def set_input(self, key, value):
+        self.inputs[key] = value
+    
+    def get_input(self, key):
+        return self.inputs.get(key, None)
+    
+    def clear_input(self, key):
+        if key in self.inputs:
+            del self.inputs[key]
+
+
+web_input_manager = InputManager()
 
 def first_request() -> str:
     """
     Ask for the first request.
     :return: The first request.
     """
+    while True:
+        if web_input_manager.get_input("usr_request"):
+            
+            request = web_input_manager.get_input("usr_request")
+            web_input_manager.clear_input("usr_request")
+            return request
 
-    return input()
+
 
 
 def new_request() -> Tuple[str, bool]:
@@ -33,7 +58,17 @@ def new_request() -> Tuple[str, bool]:
     utils.print_with_color(
         """Please enter your new request. Enter 'N' for exit.""", "cyan"
     )
-    request = input()
+    
+    while True:
+        if web_input_manager.get_input("usr_request"):
+            request =  web_input_manager.get_input("usr_request")
+            web_input_manager.clear_input("usr_request")
+            break
+        if web_input_manager.get_input("confirmation"):
+            request =  web_input_manager.get_input("confirmation")
+            web_input_manager.clear_input("confirmation")
+            break
+    print(request)
     if request.upper() == "N":
         complete = True
     else:
@@ -53,8 +88,11 @@ def experience_asker() -> bool:
         "magenta",
     )
 
-    ans = input()
-
+    while True:
+        if web_input_manager.get_input("confirmation"):
+            ans =  web_input_manager.get_input("confirmation")
+            web_input_manager.clear_input("confirmation")
+            break
     if ans.upper() == "Y":
         return True
     else:
@@ -77,8 +115,11 @@ def sensitive_step_asker(action, control_text) -> bool:
     )
 
     while True:
-        user_input = input().upper()
-
+        if web_input_manager.get_input("confirmation"):
+            user_input =  web_input_manager.get_input("confirmation")
+            web_input_manager.clear_input("confirmation")
+        else:
+            continue
         if user_input == "Y":
             return True
         elif user_input == "N":

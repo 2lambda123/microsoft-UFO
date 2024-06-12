@@ -122,6 +122,7 @@ class ContinueHostAgentState(HostAgentState):
         :param agent: The agent to handle.
         :param context: The context for the agent and session.
         """
+        print(context)
         agent.process(context)
         self.create_app_agent(agent, context)
 

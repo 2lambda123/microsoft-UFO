@@ -4,7 +4,7 @@
 
 from __future__ import annotations
 
-import time
+import time, threading
 from typing import Dict, List, Union
 
 from pywinauto.controls.uiawrapper import UIAWrapper
@@ -82,6 +82,7 @@ class HostAgent(BasicAgent):
         self._active_appagent = None
         self._blackboard = Blackboard()
         self.set_state(ContinueHostAgentState())
+        self.usr_confirmation_lock = threading.Event()
 
     def get_prompter(
         self,
@@ -226,6 +227,10 @@ class HostAgent(BasicAgent):
         self.processor = HostAgentProcessor(agent=self, context=context)
         self.processor.process()
         self.status = self.processor.status
+        while True:
+            if self.usr_confirmation_lock.is_set():
+                self.usr_confirmation_lock.clear()
+                break
 
     def print_response(self, response_dict: Dict) -> None:
         """
