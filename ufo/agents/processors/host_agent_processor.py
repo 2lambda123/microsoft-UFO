@@ -159,7 +159,7 @@ class HostAgentProcessor(BaseProcessor):
 
         if (
             self._agent_status_manager.FINISH.value in self.status.upper()
-            or self.control_text == ""
+            or self.control_text == "" and self.app_to_open is None
         ):
             self.status = self._agent_status_manager.FINISH.value
 
