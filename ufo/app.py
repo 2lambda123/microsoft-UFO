@@ -4,7 +4,7 @@ import uvicorn
 from fastapi import FastAPI, Request, BackgroundTasks, HTTPException, Depends
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
-import time, threading, sys, re
+import time, threading, sys, re, os, shutil
 from typing import Optional, Dict, Literal
 
 
@@ -51,7 +51,18 @@ class WebApp:
             self.ufo_running = False
         finally:
             sys.stdout = old_stdout
+            self.cleanup()
             pass
+
+    def cleanup(self):
+        log_dir = os.path.join(os.path.dirname(__file__), '..', 'log', 'web')
+        log_dir = os.path.abspath(log_dir) 
+        if os.path.exists(log_dir):
+            shutil.rmtree(log_dir)
+            print(f"Deleted directory: {log_dir}")
+        else:
+            print(f"Directory does not exist: {log_dir}")
+
 
 
 class StdoutWrapper:
@@ -324,7 +335,7 @@ async def get_status():
     if plan_signal.is_set():
         plan_signal.clear()
         status.message = "Please confirm the plan. Enter 'Y' to confirm or 'N' to exit."
-        status.data = {"response": plan_first_return}
+        status.data = plan_first_return
         status.status = Status.CONFIRMATION
         web_app_instance.status = Status.CONFIRMATION
     if terminate_signal.is_set():
