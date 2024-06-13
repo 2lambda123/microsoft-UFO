@@ -1,24 +1,28 @@
-from flask import Flask, request, jsonify
+import signal
+import asyncio
+import uvicorn
+from fastapi import FastAPI, Request, BackgroundTasks, HTTPException, Depends
+from fastapi.responses import JSONResponse
+from pydantic import BaseModel
 import time, threading, sys, re
+from typing import Optional, Dict, Literal
 
-# # run this flask server under UFO folder: python -m ufo.app
-
-app = Flask(__name__)
 
 UFO_PATH = r"C:\Users\v-liuhengyu\OneDrive - Microsoft\Desktop\UFO"
 terminate_signal = threading.Event()
 plan_signal = threading.Event()
-terminate_old_ufo = threading.Event()   
+save_exp = threading.Event()
+device_login = threading.Event()
 
 global plan_first_return
 plan_first_return = []
 global comment_to_return
 comment_to_return = None
+global login_info
+login_info = None
 
 
-
-class Web_app():
-
+class WebApp:
     def __init__(self) -> None:
         self.ufo_running = False
         self.main_thread = None
@@ -40,6 +44,7 @@ class Web_app():
             self.ufo_running = True
             ufo_main()  # Execution of UFO, with output captured and processed by custom_buffer
             print("UFO finished")
+            self.status = "AWAITING"
             self.ufo_running = False
         except Exception as e:
             self.error = e
@@ -47,6 +52,7 @@ class Web_app():
         finally:
             sys.stdout = old_stdout
             pass
+
 
 class StdoutWrapper:
     def __init__(self, original_stdout):
@@ -95,12 +101,20 @@ class StdoutWrapper:
             self.current_plan['plan'] += line
 
         if "Please enter your new request. Enter 'N' for exit." in line or "Request total cost is" in line or "[Input Required:]" in line or "Task Completed" in line:
-            if terminate_old_ufo.is_set():
-                return
             terminate_signal.set()
             self.finished = True 
             global comment_to_return
             comment_to_return = self.clean_ansi_codes(self.final_comment)
+            return
+        
+        if "Would you like to save the current conversation flow for future reference by the agent?" in line:
+            save_exp.set()
+            return
+        
+        if "To sign in, use a web browser to open the page https://microsoft.com/devicelogin and enter the code" in line:
+            device_login.set()
+            global login_info
+            login_info = line
             return
     
     def clean_ansi_codes(self, text):
@@ -115,7 +129,85 @@ class StdoutWrapper:
     def __getattr__(self, attr):
         return getattr(self.original_stdout, attr)
 
-web_app_instance = Web_app()
+
+class Status:
+    AWAITING = "AWAITING"
+    WAITINGREQUEST = "WAITINGREQUEST"
+    RUNNING = "RUNNING"
+    CONFIRMATION = "CONFIRMATION"
+    COMPLETED = "COMPLETED"
+    ERROR = "ERROR"
+    ROUNDFINISHED = "ROUNDFINISHED"
+    EVALUATING = "EVALUATING"
+    SAVEEXP = "SAVEEXP"
+
+
+
+class ApiResponse(BaseModel):
+    status: Literal[
+        "AWAITING", "WAITINGREQUEST", "RUNNING", "CONFIRMATION", 
+        "COMPLETED", "ERROR", "ROUNDFINISHED", "EVALUATING", "SAVEEXP"
+    ]
+    message: Optional[str] = None
+    data: Optional[Dict] = None
+
+    class Config:
+        schema_extra = {
+            "example": {
+                "status": "RUNNING",
+                "message": "Operation successful",
+                "data": {"key": "value"}
+            }
+        }
+
+class StartRequest(BaseModel):
+    task: str
+
+    class Config:
+        schema_extra = {
+            "example": {
+                "task": "your_task_name"
+            }
+        }
+
+class UserRequest(BaseModel):
+    request: str
+
+    class Config:
+        schema_extra = {
+            "example": {
+                "request": "Open outlook and initiate an email to Peter."
+            }
+        }
+
+class ConfirmationRequest(BaseModel):
+    confirmation: str
+
+    class Config:
+        schema_extra = {
+            "example": {
+                "confirmation": "Y"
+            }
+        }
+
+class RetrieveSessionRequest(BaseModel):
+    session_id: str
+
+    class Config:
+        schema_extra = {
+            "example": {
+                "session_id": "12345"
+            }
+        }
+
+
+def shutdown():
+    print("Shutting down gracefully...")
+    asyncio.get_event_loop().stop()
+
+
+
+web_app_instance = WebApp()
 
 global usr_confirmation
 usr_confirmation = True
@@ -128,126 +220,174 @@ def clear_cached_input() -> None:
     web_input_manager.clear_input('usr_request')
     web_input_manager.clear_input('confirmation')
 
-@app.route('/ufo/start', methods=['POST'])
-def start_ufo():
-    task_name = request.form.get('task', 'web') 
+
+app = FastAPI()
+
+@app.post("/ufo/start", response_model=ApiResponse, response_description="Start the UFO instance.")
+async def start_ufo(request: StartRequest):
+    """
+    Start the UFO instance with a given task.
+
+    - **task**: Name of the task to start
+    """
     clear_cached_input()
     if not web_app_instance.ufo_running:
-        web_app_instance.main_thread = threading.Thread(target=web_app_instance.ufo_start, args=(task_name,))
+        web_app_instance.main_thread = threading.Thread(target=web_app_instance.ufo_start, args=(request.task,))
         web_app_instance.main_thread.start()
-        web_app_instance.status = 'RUNNING'
-        return jsonify({"response": "UFO instance started"}), 200
+        web_app_instance.status = Status.WAITINGREQUEST
+        return ApiResponse(status=web_app_instance.status, message="UFO instance started")
     else:
-        return jsonify({"response": "UFO instance already running"}), 200
+        return ApiResponse(status=Status.ERROR, message="UFO instance already running")
 
 
-@app.route('/ufo/request', methods=['POST'])
-def handle_request():
+@app.post("/ufo/request", response_model=ApiResponse, response_description="Handle user request.")
+async def handle_request(request: UserRequest):
+    """
+    Handle user request.
+
+    - **request**: JSON object with the user's request
+    """
     if not web_app_instance.ufo_running:
-        return jsonify({"response": "UFO not running"}), 200
+        return ApiResponse(status=Status.AWAITING, message="UFO not running")
     global plan_first_return
     plan_first_return = []
-    usr_request = request.json.get('request', 'No Request, end UFO')
+    usr_request = request.request
+    if web_app_instance.status != Status.WAITINGREQUEST and web_app_instance.status != Status.ROUNDFINISHED and web_app_instance.status != Status.COMPLETED:
+        return ApiResponse(status=web_app_instance.status, message="No request expected")
     if usr_request.upper() == 'Y' or usr_request.upper() == 'N':
         web_input_manager.set_input('confirmation', usr_request)
-    elif usr_request.upper() == 'STOP':
-        session_id = Global_Session.store_session()
-        while web_app_instance.ufo_running:
-            web_input_manager.set_input('confirmation', "N")
-            time.sleep(1)
-        return jsonify({"response": f"Session saved. Please enter your new request, or retrieve the saved session with 'Retrieve Session: {session_id}'"}), 200
-    elif 'RETRIEVE SESSION' in usr_request.upper():
-        parts = usr_request.split(': ')
-        session_id = parts[1]
-        Global_Session.load_session(session_id)
+        if web_app_instance.status == Status.ROUNDFINISHED:
+            web_app_instance.status = Status.EVALUATING
     else:
         web_input_manager.set_input('usr_request', usr_request)
-    
-    while True:
-        if plan_signal.is_set():
-            plan_ret = plan_first_return
-            plan_first_return = []
-            web_app_instance.status = 'CONFIRMATION'
-            return jsonify(plan_ret), 200
-        if terminate_signal.is_set() and usr_confirmation:
-            terminate_signal.clear()
-            global comment_to_return
-            comment_ret = comment_to_return
-            comment_to_return = None
-            final_ret_str = f"{comment_ret}\nPlease enter your new request. Enter 'N' for exit."
-            return jsonify({"response": final_ret_str}), 200
+        web_app_instance.status = Status.RUNNING
+    return ApiResponse(status=web_app_instance.status, message="Request received")
 
 
-@app.route('/ufo/save_session', methods=['POST'])
-def save_session():
+@app.post("/ufo/save_session", response_model=ApiResponse, response_description="Save the current session.")
+async def save_session():
+    """
+    Save the current session.
+    """
     session_id = Global_Session.store_session()
-    return jsonify({"response": f"Session saved with id {session_id}"}), 200
+    return ApiResponse(status=web_app_instance.status, data={"session_id": session_id})
 
 
-@app.route('/ufo/retrieve_session', methods=['POST'])
-def retrieve_session():
-    session_id = request.json.get('session_id')
+@app.post("/ufo/retrieve_session", response_model=ApiResponse, response_description="Retrieve a saved session.")
+async def retrieve_session(request: RetrieveSessionRequest):
+    """
+    Retrieve a saved session using the session ID.
+
+    - **session_id**: The ID of the session to retrieve
+    """
+    session_id = request.session_id
     Global_Session.load_session(session_id)
-    return jsonify({"response": "Session loaded"}), 200
+    return ApiResponse(status=web_app_instance.status, message="Session loaded")
 
 
-@app.route('/ufo/get_status', methods=['GET'])
-def get_status():
-    return jsonify(web_app_instance.status), 200
-
-
-@app.route('/ufo/get_session_state', methods=['GET'])
-def get_session_state():
+@app.get("/ufo/get_status", response_model=ApiResponse, response_description="Get the current status of the UFO instance.")
+async def get_status():
+    """
+    Get the current status of the UFO instance.
+    """
     if not web_app_instance.ufo_running:
-        return jsonify({"response": "UFO not running"}), 200
+        web_app_instance.status = Status.AWAITING
+    status = ApiResponse(status=web_app_instance.status)
+    if plan_signal.is_set():
+        plan_signal.clear()
+        status.message = plan_first_return
+        status.status = Status.CONFIRMATION
+        web_app_instance.status = Status.CONFIRMATION
+    if terminate_signal.is_set():
+        terminate_signal.clear()
+        global comment_to_return
+        comment_ret = comment_to_return
+        comment_to_return = None
+        final_ret_str = f"{comment_ret}\nPlease enter your new request. Enter 'N' for exit."
+        status.message = final_ret_str
+        status.status = Status.ROUNDFINISHED
+        web_app_instance.status = Status.ROUNDFINISHED
+    if save_exp.is_set():
+        save_exp.clear()
+        status.status = Status.SAVEEXP
+        web_app_instance.status = Status.SAVEEXP
+    if device_login.is_set():
+        status.message = login_info
+        device_login.clear()
+    return status
+
+
+@app.get("/ufo/get_session_state", response_model=ApiResponse, response_description="Get the current state of the session.")
+async def get_session_state():
+    """
+    Get the current state of the session.
+    """
+    if not web_app_instance.ufo_running:
+        return ApiResponse(web_app_instance.status, message="UFO not running")
     state = Global_Session.get_state()
-    return jsonify(state), 200
+    return ApiResponse(web_app_instance.status, data=state)
 
 
-@app.route('/ufo/pause', methods=['GET'])
-def pause_ufo():
+@app.get("/ufo/pause", response_model=ApiResponse, response_description="Pause the current session.")
+async def pause_ufo():
+    """
+    Pause the current session.
+    """
     if not web_app_instance.ufo_running:
-        return jsonify({"response": "UFO not running"}), 200
+        return ApiResponse(web_app_instance.status, message="UFO not running")
     response = Global_Session.pause_session()
     if not response:
-        return jsonify({"response": "Session paused"}), 200
-    return jsonify(response), 200
+        return ApiResponse(web_app_instance.status, message="Session paused")
+    return ApiResponse(status=Status.ERROR, message=response)
 
 
-@app.route('/ufo/resume', methods=['GET'])
-def resume_ufo():
+@app.get("/ufo/resume", response_model=ApiResponse, response_description="Resume the current session.")
+async def resume_ufo():
+    """
+    Resume the current session.
+    """
     if not web_app_instance.ufo_running:
-        return jsonify({"response": "UFO not running"}), 200
+        return ApiResponse(web_app_instance.status, message="UFO not running")
     response = Global_Session.resume_session()
     if not response:
-        return jsonify({"response": "Session resumed"}), 200
-    return jsonify(response), 200
+        return ApiResponse(web_app_instance.status, message="Session resumed")
+    return ApiResponse(status=Status.ERROR, message=response)
 
 
-@app.route('/ufo/confirmation', methods=['POST'])
-def confirmation():
+@app.post("/ufo/confirmation", response_model=ApiResponse, response_description="The confirmation response.")
+async def confirmation(request: ConfirmationRequest):
+    """
+    Handle user confirmation.
+
+    - **confirmation**: The user confirmation, expected values are 'Y' or 'N'
+    """
     if not web_app_instance.ufo_running:
-        return jsonify({"response": "UFO not running"}), 200
-    usr_request = request.json.get('confirmation')
-    web_input_manager.set_input('confirmation', usr_request)
+        return ApiResponse(web_app_instance.status, message="UFO not running")
+    web_input_manager.set_input('confirmation', request.confirmation)
 
-    if plan_signal.is_set():
+    if web_app_instance.status == Status.CONFIRMATION:
         web_input_manager.clear_input('confirmation')
-        if usr_request == 'Y':
+        if request.confirmation == 'Y':
             plan_signal.clear()
             Global_Session.unlock_confirmation()
         else: 
             global usr_confirmation
             usr_confirmation = False
-            plan_signal.clear()
             Global_Session.terminate_session()
             if terminate_signal.is_set():
                 terminate_signal.clear()
-            web_app_instance.status = 'CONFIRMATION or NEW REQUEST'
-            return jsonify({"response": "Please enter your new request. Enter 'N' for exit."}), 200
-    web_app_instance.status = 'RUNNING'
-    return jsonify({"response": "Confirmation received"}), 200
+            web_app_instance.status = Status.ROUNDFINISHED
+            return ApiResponse(status=web_app_instance.status, message="Please enter your new request. Enter 'N' for exit.")
+        
+    if web_app_instance.status == Status.SAVEEXP:
+        web_app_instance.status = Status.COMPLETED
+        return ApiResponse(status=web_app_instance.status, message="TASK COMPLETED")
+    web_app_instance.status = Status.RUNNING
+    return ApiResponse(status=web_app_instance.status, message="Confirmation received")
 
 
 if __name__ == '__main__':
-    app.run(debug=True)
+    import uvicorn
+    signal.signal(signal.SIGINT, lambda s, f: shutdown())
+    signal.signal(signal.SIGTERM, lambda s, f: shutdown())
+    uvicorn.run(app, host="0.0.0.0", port=8000, log_level="debug")
