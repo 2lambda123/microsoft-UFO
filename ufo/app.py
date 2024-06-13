@@ -252,16 +252,18 @@ async def handle_request(request: UserRequest):
     global plan_first_return
     plan_first_return = []
     usr_request = request.request
+    message = "Request received. Waiting for response..."
     if web_app_instance.status != Status.WAITINGREQUEST and web_app_instance.status != Status.ROUNDFINISHED and web_app_instance.status != Status.COMPLETED:
         return ApiResponse(status=web_app_instance.status, message="No request expected")
     if usr_request.upper() == 'Y' or usr_request.upper() == 'N':
         web_input_manager.set_input('confirmation', usr_request)
         if web_app_instance.status == Status.ROUNDFINISHED:
             web_app_instance.status = Status.EVALUATING
+            message = "Round finished. Evaluating..."
     else:
         web_input_manager.set_input('usr_request', usr_request)
         web_app_instance.status = Status.RUNNING
-    return ApiResponse(status=web_app_instance.status, message="Request received")
+    return ApiResponse(status=web_app_instance.status, message=message)
 
 
 @app.post("/ufo/save_session", response_model=ApiResponse, response_description="Save the current session.")
@@ -295,7 +297,8 @@ async def get_status():
     status = ApiResponse(status=web_app_instance.status)
     if plan_signal.is_set():
         plan_signal.clear()
-        status.message = plan_first_return
+        status.message = "Please confirm the plan. Enter 'Y' to confirm or 'N' to exit."
+        status.data = {"response": plan_first_return}
         status.status = Status.CONFIRMATION
         web_app_instance.status = Status.CONFIRMATION
     if terminate_signal.is_set():
@@ -303,8 +306,9 @@ async def get_status():
         global comment_to_return
         comment_ret = comment_to_return
         comment_to_return = None
-        final_ret_str = f"{comment_ret}\nPlease enter your new request. Enter 'N' for exit."
+        final_ret_str = "Here is the comment for the last request. Please enter your new request. Enter 'N' for exit."
         status.message = final_ret_str
+        status.data = {"response": comment_ret}
         status.status = Status.ROUNDFINISHED
         web_app_instance.status = Status.ROUNDFINISHED
     if save_exp.is_set():
