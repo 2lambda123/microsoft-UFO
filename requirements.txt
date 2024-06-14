@@ -1,20 +1,21 @@
 art==6.1
+beautifulsoup4==4.12.3
 colorama==0.4.6
-langchain==0.1.11
-langchain_community==0.0.27
+dashscope==1.19.3
+dill==0.3.8
+fastapi==0.111.0
+langchain==0.2.4
+langchain_community==0.2.4
 msal==1.25.0
-openai==1.13.3
+nltk==3.8.1
+pandas==2.2.2
 Pillow==10.3.0
+psutil==5.9.8
+pydantic==2.7.4
 pywin32==306
 pywinauto==0.6.8
 PyYAML==6.0.1
-Requests==2.31.0
-faiss-cpu==1.8.0
-lxml==5.1.0
-psutil==5.9.8
-beautifulsoup4==4.12.3
-sentence-transformers==2.5.1
-##For Qwen
-#dashscope==1.15.0
-##For removing stopwords
-#nltk==3.8.1
+PyYAML==6.0.1
+Requests==2.32.3
+sentence_transformers==2.5.1
+uvicorn==0.30.1
