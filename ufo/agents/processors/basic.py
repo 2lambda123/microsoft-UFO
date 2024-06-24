@@ -3,18 +3,19 @@
 
 
 import json
+import time
 import traceback
 from abc import ABC, abstractmethod
-from typing import List, Union
+from typing import List
 
 from pywinauto.controls.uiawrapper import UIAWrapper
 
+from ufo.agents.agent.basic import BasicAgent
 from ufo import utils
 from ufo.automator.ui_control.inspector import ControlInspectorFacade
 from ufo.automator.ui_control.screenshot import PhotographerFacade
 from ufo.config.config import Config
 from ufo.module.context import Context, ContextNames
-from ufo.agents.agent.basic import BasicAgent
 
 configs = Config.get_instance().config_data
 BACKEND = configs["CONTROL_BACKEND"]
@@ -48,6 +49,7 @@ class BaseProcessor(ABC):
         self._control_text = None
         self._response_json = {}
         self._results = None
+        self._question_list = []
         self._agent_status_manager = self.agent.status_manager
 
     def process(self) -> None:
@@ -59,11 +61,12 @@ class BaseProcessor(ABC):
         3. Get the control information.
         4. Get the prompt message.
         5. Get the response.
-        6. Update the context.
+        6. Update the cost.
         7. Parse the response.
         8. Execute the action.
         9. Update the memory.
         10. Update the step and status.
+        11. Update the step.
         """
 
         # Step 1: Print the step information.
@@ -90,7 +93,7 @@ class BaseProcessor(ABC):
         # Step 7: Parse the response, if there is no error.
         self.parse_response()
 
-        if self.is_error():
+        if self.is_error() or self.is_paused():
             return
 
         # Step 8: Execute the action.
@@ -107,16 +110,20 @@ class BaseProcessor(ABC):
 
     def resume(self) -> None:
         """
-        Resume the process of action execution.
+        Resume the process of action execution after the session is paused.
         """
 
+        # Step 1: Execute the action.
         self.execute_action()
+
+        # Step 2: Update the memory.
         self.update_memory()
 
-        if self.should_create_subagent():
-            self.create_sub_agent()
-
+        # Step 3: Update the status.
         self.update_status()
+
+        # Step 4: Update the step.
+        self.update_step()
 
     @abstractmethod
     def print_step_info(self) -> None:
@@ -174,12 +181,15 @@ class BaseProcessor(ABC):
         """
         pass
 
-    @abstractmethod
     def update_status(self) -> None:
         """
         Update the status of the session.
         """
-        pass
+        self.agent.step += 1
+        self.agent.status = self.status
+
+        if self.status != self._agent_status_manager.FINISH.value:
+            time.sleep(configs["SLEEP_TIME"])
 
     @property
     def context(self) -> Context:
@@ -432,13 +442,47 @@ class BaseProcessor(ABC):
         """
         self._cost = cost
 
+    @property
+    def question_list(self) -> List[str]:
+        """
+        Get the question list.
+        :return: The question list.
+        """
+
+        if type(self._question_list) == str:
+            self._question_list = [self._question_list]
+
+        return self._question_list
+
+    @question_list.setter
+    def question_list(self, question_list: List[str]) -> None:
+        """
+        Set the question list.
+        :param question_list: The question list.
+        """
+        self._question_list = question_list
+
     def is_error(self) -> bool:
         """
         Check if the process is in error.
         :return: The boolean value indicating if the process is in error.
         """
 
-        return self._status == self._agent_status_manager.ERROR.value
+        self.agent.status = self.status
+        return self.status == self._agent_status_manager.ERROR.value
+
+    def is_paused(self) -> bool:
+        """
+        Check if the process is paused.
+        :return: The boolean value indicating if the process is paused.
+        """
+
+        self.agent.status = self.status
+
+        return (
+            self.status == self._agent_status_manager.PENDING.value
+            or self.status == self._agent_status_manager.CONFIRM.value
+        )
 
     def log(self, response_json: dict) -> None:
         """

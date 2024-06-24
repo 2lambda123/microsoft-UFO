@@ -153,6 +153,8 @@ class HostAgentProcessor(BaseProcessor):
         self._response_json["Plan"] = self._plan
 
         self.status = self._response_json.get("Status", "")
+        self.question_list = self._response_json.get("Questions", [])
+
         self.app_to_open = self._response_json.get("AppsToOpen", None)
 
         self.host_agent.print_response(self._response_json)
@@ -177,6 +179,8 @@ class HostAgentProcessor(BaseProcessor):
             new_app_window = self._desktop_windows_dict.get(self.control_label, None)
             print("NEW APP WINDOW TYPE", type(new_app_window))
         if new_app_window is None:
+
+            self.status = self._agent_status_manager.FINISH.value
             return
 
         # Get the root name of the application.
@@ -185,6 +189,7 @@ class HostAgentProcessor(BaseProcessor):
         # Check if the window interface is available for the visual element.
         if not self.is_window_interface_available(new_app_window):
             self.status = self._agent_status_manager.ERROR.value
+
             return
 
         # Switch to the new application window, if it is different from the current application window.
